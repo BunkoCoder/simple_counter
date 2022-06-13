@@ -8,6 +8,7 @@
 #include <esp_wpa2.h> //wpa2 library for connections to Enterprise networks
 #include <esp_wifi.h>
 
+#define DEBUG true
 
 #define CILINDER_PIN 4
 #define DEBUG_LIGHT 2
@@ -46,6 +47,7 @@ volatile bool dead = false;
 float temperature;
 bool done = false;
 int valuePrej;
+unsigned long info, cayinfo;
 
 String url;
 
@@ -58,15 +60,25 @@ void message_to_whatsapp(String message);
 bool postData();
 String urlencode(String str);
 void EnduroamWiFi();
+void I_WILL_CONNECT();
 
 void setup()
 {
+  if (DEBUG)
+    Serial.begin(9600);
+
+  pinMode(TEMP_SENS_VCC, OUTPUT);
+  digitalWrite(TEMP_SENS_VCC, HIGH);
+
   EEPROM.begin((sizeof(uint32_t) / sizeof(uint8_t)));
   pot = getPOT(0);
   attachInterrupt(CILINDER_PIN, ISR_CILINDER, RISING);
   sensors.begin();
   temperature = getTemp();
   EnduroamWiFi();
+  if (DEBUG)
+    Serial.println(WiFi.localIP());
+
   Cayenne.begin(username, password, clientID);
 }
 
@@ -78,24 +90,45 @@ void loop()
     message_to_whatsapp("! USTAVLJEN ! \n DOLŽINA POTI: " + (String)(pot * DOLZINA_POTI) + " m \n TEMPERATURA: " + (String)temperature + " °C");
     dead = true;
   }
-  if (!dead && temptime % CAYENNE_UPDATE_TIME == 0)
+  if (!dead && temptime - info >= INFO_TIME)
+  {
     message_to_whatsapp("DELAM \n DOLŽINA POTI: " + (String)(pot * DOLZINA_POTI) + " m \n TEMPERATURA: " + (String)temperature + " °C");
+    info += INFO_TIME;
+  }
   else if (!done && pot * DOLZINA_POTI >= JAVI_DOSEZENO_POT)
   {
     message_to_whatsapp("ZASTAVLJENA POT OPRAVLJENA \n DOLŽINA POTI:" + (String)(pot * DOLZINA_POTI) + " m \n TEMPERATURA: " + (String)temperature + " °C");
     done = true;
   }
-  if (temptime % INFO_TIME == 0)
+  if (temptime - cayinfo >= CAYENNE_UPDATE_TIME)
   {
     temperature = getTemp();
-    if (WiFi.status() != WL_CONNECTED)
-    {
-      WiFi.disconnect();
-      WiFi.reconnect();
-      Cayenne.connect();
-    }
+    if (DEBUG)
+      Serial.println(temperature);
+    if (!WiFi.isConnected())
+      I_WILL_CONNECT();
     Cayenne.loop();
+    cayinfo += CAYENNE_UPDATE_TIME;
   }
+}
+
+void I_WILL_CONNECT()
+{
+  EnduroamWiFi();
+  unsigned int stevec = 0;
+  while (!WiFi.isConnected())
+  {
+    if (stevec >= 40)
+    {
+      if (DEBUG)
+        Serial.println("RESTARTING...");
+      setPOT(0);
+      esp_restart();
+    }
+    stevec++;
+    delay(500);
+  }
+  Cayenne.connect();
 }
 
 CAYENNE_OUT_DEFAULT()
@@ -109,7 +142,10 @@ CAYENNE_IN(VIRTUAL_CHANNEL)
 {
   int value = getValue.asInt();
   if (valuePrej != value)
+  {
     pot = 0;
+    message_to_whatsapp("asdasdasdas" + (String)(pot * DOLZINA_POTI) + " m \n IN TI ME ZRESETIRAŠ :|");
+  }
 }
 
 void IRAM_ATTR ISR_CILINDER()
@@ -117,7 +153,7 @@ void IRAM_ATTR ISR_CILINDER()
   if (millis() - lastKlick >= CILINDER_DEBOUNCE)
   {
     pot++;
-    lastKlick += CILINDER_TIMEOUT;
+    lastKlick = millis();
     dead = false;
   }
 }
@@ -152,17 +188,24 @@ float getTemp()
 
 void message_to_whatsapp(String message) // user define function to send meassage to WhatsApp app
 {
+  if (DEBUG)
+    Serial.println(message);
   setPOT(0);
   url = "https://api.callmebot.com/whatsapp.php?phone=" + PHONE_NUM + "&apikey=" + APIKEY + "&text=" + urlencode(message);
   for (int i = 0; i < 3; i++)
   {
     if (postData())
+    {
+      if (DEBUG)
+        Serial.println("JE POSLALU");
       break;
+    }
     else
     {
-      WiFi.disconnect();
-      WiFi.reconnect();
-      Cayenne.connect();
+      if (DEBUG)
+        Serial.println("NI POSLALU");
+      if (!WiFi.isConnected())
+        I_WILL_CONNECT();
     } // calling postData to run the above-generated url once so that you will receive a message.
   }
 }
