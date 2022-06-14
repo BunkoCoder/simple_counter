@@ -30,12 +30,12 @@
 
 const char *ssid = "eduroam"; // eduroam SSID
 
-char username[] = "da4caf40-e4f2-11ec-a681-73c9540e1265";
-char password[] = "ac2330f16dab84423205e47e24e2b676ba49b1b7";
-char clientID[] = "ed222820-e4f2-11ec-9f5b-45181495093e";
+char username[] = "";
+char password[] = "";
+char clientID[] = "";
 
-String PHONE_NUM = "+38630238798";
-String APIKEY = "978395";
+String PHONE_NUM = "";
+String APIKEY = "";
 
 OneWire oneWire(ONE_WIRE_BUS_PIN);
 DallasTemperature sensors(&oneWire);
@@ -45,7 +45,7 @@ volatile unsigned long lastKlick;
 volatile bool dead = false;
 
 float temperature;
-bool done = false;
+volatile bool done = false;
 int valuePrej;
 unsigned long info, cayinfo;
 
@@ -75,22 +75,19 @@ void setup()
   attachInterrupt(CILINDER_PIN, ISR_CILINDER, RISING);
   sensors.begin();
   temperature = getTemp();
-  EnduroamWiFi();
+  I_WILL_CONNECT();
   if (DEBUG)
     Serial.println(WiFi.localIP());
-
-  Cayenne.begin(username, password, clientID);
 }
 
 void loop()
 {
-  unsigned long temptime = millis();
-  if (!dead && temptime - lastKlick >= CILINDER_TIMEOUT)
+  if (!dead && millis() - lastKlick >= CILINDER_TIMEOUT)
   {
     message_to_whatsapp("! USTAVLJEN ! \n DOLŽINA POTI: " + (String)(pot * DOLZINA_POTI) + " m \n TEMPERATURA: " + (String)temperature + " °C");
     dead = true;
   }
-  if (!dead && temptime - info >= INFO_TIME)
+  if (!dead && millis() - info >= INFO_TIME)
   {
     message_to_whatsapp("DELAM \n DOLŽINA POTI: " + (String)(pot * DOLZINA_POTI) + " m \n TEMPERATURA: " + (String)temperature + " °C");
     info += INFO_TIME;
@@ -100,7 +97,7 @@ void loop()
     message_to_whatsapp("ZASTAVLJENA POT OPRAVLJENA \n DOLŽINA POTI:" + (String)(pot * DOLZINA_POTI) + " m \n TEMPERATURA: " + (String)temperature + " °C");
     done = true;
   }
-  if (temptime - cayinfo >= CAYENNE_UPDATE_TIME)
+  if (millis() - cayinfo >= CAYENNE_UPDATE_TIME)
   {
     temperature = getTemp();
     if (DEBUG)
@@ -108,6 +105,8 @@ void loop()
     if (!WiFi.isConnected())
       I_WILL_CONNECT();
     Cayenne.loop();
+    if (DEBUG)
+      Serial.println("LOOP");
     cayinfo += CAYENNE_UPDATE_TIME;
   }
 }
@@ -128,7 +127,7 @@ void I_WILL_CONNECT()
     stevec++;
     delay(500);
   }
-  Cayenne.connect();
+  Cayenne.begin(username, password, clientID);
 }
 
 CAYENNE_OUT_DEFAULT()
@@ -144,7 +143,8 @@ CAYENNE_IN(VIRTUAL_CHANNEL)
   if (valuePrej != value)
   {
     pot = 0;
-    message_to_whatsapp("asdasdasdas" + (String)(pot * DOLZINA_POTI) + " m \n IN TI ME ZRESETIRAŠ :|");
+    done = false;
+    message_to_whatsapp("RESET: " + (String)(pot * DOLZINA_POTI));
   }
 }
 
@@ -153,8 +153,8 @@ void IRAM_ATTR ISR_CILINDER()
   if (millis() - lastKlick >= CILINDER_DEBOUNCE)
   {
     pot++;
-    lastKlick = millis();
     dead = false;
+    lastKlick = millis();
   }
 }
 
@@ -233,27 +233,15 @@ String urlencode(String str) // Function used for encoding the url
   for (int i = 0; i < str.length(); i++)
   {
     c = str.charAt(i);
-    if (c == ' ')
-    {
-      encodedString += '+';
-    }
-    else if (isalnum(c))
-    {
-      encodedString += c;
-    }
+    if (c == ' ') encodedString += '+';
+    else if (isalnum(c)) encodedString += c;
     else
     {
       code1 = (c & 0xf) + '0';
-      if ((c & 0xf) > 9)
-      {
-        code1 = (c & 0xf) - 10 + 'A';
-      }
+      if ((c & 0xf) > 9) code1 = (c & 0xf) - 10 + 'A';
       c = (c >> 4) & 0xf;
       code0 = c + '0';
-      if (c > 9)
-      {
-        code0 = c - 10 + 'A';
-      }
+      if (c > 9) code0 = c - 10 + 'A';
       encodedString += '%';
       encodedString += code0;
       encodedString += code1;
